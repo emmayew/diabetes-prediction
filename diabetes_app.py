@@ -1,5 +1,3 @@
-from datetime import datetime
-import io
 from pathlib import Path
 import pickle
 
@@ -25,18 +23,6 @@ try:
     PLOTS_AVAILABLE = True
 except ImportError:
     PLOTS_AVAILABLE = False
-
-# reportlab is only needed for the PDF download button.
-try:
-    from reportlab.lib import colors
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-    from reportlab.lib.units import cm
-    from reportlab.platypus import Image as RLImage
-    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
-    PDF_AVAILABLE = True
-except ImportError:
-    PDF_AVAILABLE = False
 
 APP_DIR = Path(__file__).resolve().parent
 DATA_FILE = APP_DIR / "diabetes.csv"
@@ -178,110 +164,6 @@ def make_pairplot(df):
     return grid.fig
 
 
-def _fig_to_png(fig):
-    """Render a matplotlib figure to an in-memory PNG."""
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    buf.seek(0)
-    return buf
-
-
-def make_pdf_report(last, results, matrices, best_params):
-    """Build a PDF report of the latest prediction and the model results."""
-    name = last["model"]
-    probs = last["probabilities"]
-    verdict = (
-        "Higher likelihood of diabetes" if last["prediction"] == 1
-        else "Lower likelihood of diabetes"
-    )
-
-    styles = getSampleStyleSheet()
-    small = ParagraphStyle("small", parent=styles["Normal"], fontSize=8, leading=10,
-                           textColor=colors.HexColor("#526174"))
-    table_style = TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2458a6")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#cbd5e1")),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f3f6fb")]),
-        ("ALIGN", (1, 0), (-1, -1), "CENTER"),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-    ])
-
-    story = [
-        Paragraph("AI Diabetes Risk Assessment Report", styles["Title"]),
-        Paragraph(datetime.now().strftime("Generated on %d %B %Y"), styles["Normal"]),
-        Spacer(1, 10),
-        Paragraph("Patient Measurements", styles["Heading2"]),
-    ]
-
-    rows = [["Measurement", "Value"]]
-    for key, value in last["inputs"].items():
-        rows.append([key, f"{value:g}"])
-    t = Table(rows, colWidths=[8 * cm, 6 * cm])
-    t.setStyle(table_style)
-    story += [t, Spacer(1, 10)]
-
-    story += [
-        Paragraph("Prediction", styles["Heading2"]),
-        Paragraph(f"<b>Model:</b> {name}", styles["Normal"]),
-        Paragraph(f"<b>Result:</b> {verdict}", styles["Normal"]),
-        Paragraph(f"<b>Probability of not having diabetes:</b> {probs[0]:.2%}", styles["Normal"]),
-        Paragraph(f"<b>Probability of having diabetes:</b> {probs[1]:.2%}", styles["Normal"]),
-        Spacer(1, 6),
-    ]
-
-    story += [Paragraph("Model Comparison", styles["Heading2"])]
-    rows = [["Model", "Cross-validated accuracy", "Held-out test accuracy"]]
-    for _, r in results.iterrows():
-        rows.append([
-            r["Model"],
-            f"{r['Cross-validated accuracy']:.1%}",
-            f"{r['Held-out test accuracy']:.1%}",
-        ])
-    t = Table(rows, colWidths=[5.5 * cm, 5.5 * cm, 5.5 * cm])
-    t.setStyle(table_style)
-    story += [t, Spacer(1, 4)]
-    settings = ", ".join(f"{k} = {v}" for k, v in best_params[name].items())
-    story += [Paragraph(f"Best settings for {name}: {settings}", small), Spacer(1, 8)]
-
-    if PLOTS_AVAILABLE:
-        fig_p, ax_p = plt.subplots(figsize=(5, 2.5))
-        sns.barplot(x=["No Diabetes", "Diabetes"], y=probs, ax=ax_p)
-        ax_p.set_ylim(0, 1)
-        ax_p.set_ylabel("Probability")
-        ax_p.set_title("Prediction Probabilities")
-        story += [RLImage(_fig_to_png(fig_p), width=9 * cm, height=4.5 * cm), Spacer(1, 8)]
-
-        fig_c, ax_c = plt.subplots(figsize=(4, 3.2))
-        sns.heatmap(
-            matrices[name], annot=True, fmt="d", cmap="Blues", cbar=False,
-            xticklabels=["No Diabetes", "Diabetes"],
-            yticklabels=["No Diabetes", "Diabetes"], ax=ax_c,
-        )
-        ax_c.set_title(f"Confusion Matrix ({name}, test data)")
-        ax_c.set_xlabel("Predicted")
-        ax_c.set_ylabel("Actual")
-        story += [RLImage(_fig_to_png(fig_c), width=8 * cm, height=6.4 * cm), Spacer(1, 8)]
-
-    story.append(Paragraph(
-        "This is an educational demonstration, not a medical diagnosis. Accuracy figures "
-        "describe model performance on this dataset only; they are not the probability "
-        "that an individual has diabetes.",
-        small,
-    ))
-
-    buf = io.BytesIO()
-    SimpleDocTemplate(
-        buf, pagesize=A4, leftMargin=2 * cm, rightMargin=2 * cm,
-        topMargin=2 * cm, bottomMargin=2 * cm, title="AI Diabetes Risk Assessment Report",
-    ).build(story)
-    return buf.getvalue()
-
-
 st.set_page_config(page_title="AI Diabetes Risk Assessment", page_icon="🩺", layout="wide")
 
 
@@ -377,25 +259,6 @@ st.markdown(
 
     [data-testid="stSidebar"] button[kind="primary"]:hover {
         background: #dc2626;
-        border: none;
-    }
-
-    /* Download (PDF) button - change the two colours below to restyle it */
-    [data-testid="stDownloadButton"] button {
-        background: #2563eb;
-        border: none;
-        border-radius: 9px;
-        min-height: 3rem;
-        font-weight: 600;
-    }
-
-    [data-testid="stDownloadButton"] button,
-    [data-testid="stDownloadButton"] button p {
-        color: white !important;
-    }
-
-    [data-testid="stDownloadButton"] button:hover {
-        background: #1d4ed8;
         border: none;
     }
 
@@ -563,8 +426,7 @@ if predict_clicked:
     )
     prediction = int(model.predict(input_df)[0])
     probabilities = model.predict_proba(input_df)[0]
-    # Keep the latest prediction in the session so it stays on screen (and can be
-    # put into the PDF) even after the page reruns, e.g. when downloading.
+    # Keep the latest prediction in the session so it stays on screen after reruns.
     st.session_state["last_prediction"] = {
         "model": model_choice,
         "inputs": {k: float(v) for k, v in input_df.iloc[0].items()},
@@ -600,21 +462,6 @@ if last:
         "Test accuracy describes performance on this dataset split only. "
         "It is not the probability that this individual has diabetes."
     )
-
-    # PDF report download
-    st.subheader("Download Report")
-    if PDF_AVAILABLE:
-        st.download_button(
-            "Download report (PDF)",
-            data=make_pdf_report(last, results, matrices, best_params),
-            file_name="diabetes_risk_report.pdf",
-            mime="application/pdf",
-        )
-    else:
-        st.warning(
-            "PDF export needs the `reportlab` package. Install it with "
-            "`python -m pip install reportlab` (and add `reportlab` to requirements.txt "
-            "if the app is hosted online), then restart the app."
-        )
 else:
+    st.info("Adjust the values in the left panel, then click **Predict**.")
     st.info("Adjust the values in the left panel, then click **Predict**.")
